@@ -8,13 +8,14 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:16
         env:
           POSTGRES_USER: main
           POSTGRES_PASSWORD: main
-          POSTGRES_DB: realworld_test
+          POSTGRES_DB: main
         ports:
           - 5434:5432
         options: >-
@@ -31,39 +32,57 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install system build deps
-        run: sudo apt-get update && sudo apt-get install -y libpq-dev python3-dev
+      - name: Install system build deps (incl. psql client)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpq-dev python3-dev postgresql-client
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Core app deps (explicit to avoid build step)
+          # Core app deps (async psycopg driver + pydantic v2 extras, etc.)
           pip install fastapi "uvicorn[standard]" sqlalchemy psycopg2-binary psycopg pydantic[email] pydantic-settings httpx python-jose passlib[bcrypt] python-slugify
+          # If your repo has a requirements.txt, install it too
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
+          # Test tooling
           pip install pytest pytest-cov alembic
 
       - name: Configure env
         run: |
           echo "APP_ENV=test" >> $GITHUB_ENV
-          # DSNs (set BOTH async & sync to be safe)
-          echo "DATABASE_URL=postgresql+psycopg://main:main@localhost:5434/realworld_test" >> $GITHUB_ENV
-          echo "ASYNC_DATABASE_URL=postgresql+psycopg://main:main@localhost:5434/realworld_test" >> $GITHUB_ENV
-          # Split vars (for configs that compose the DSN from parts)
+          # Use async psycopg driver and the correct DB/user/pass/port
+          echo "DATABASE_URL=postgresql+psycopg://main:main@localhost:5434/main" >> $GITHUB_ENV
+          # Some projects read a separate async DSN; set it too just in case
+          echo "ASYNC_DATABASE_URL=postgresql+psycopg://main:main@localhost:5434/main" >> $GITHUB_ENV
+          # Split vars for configs that compose the DSN from parts
           echo "POSTGRES_HOST=localhost" >> $GITHUB_ENV
           echo "POSTGRES_PORT=5434" >> $GITHUB_ENV
-          echo "POSTGRES_DB=realworld_test" >> $GITHUB_ENV
+          echo "POSTGRES_DB=main" >> $GITHUB_ENV
           echo "POSTGRES_USER=main" >> $GITHUB_ENV
           echo "POSTGRES_PASSWORD=main" >> $GITHUB_ENV
           echo "SECRET_KEY=test-secret-please-change" >> $GITHUB_ENV
 
       - name: Wait for Postgres to accept connections
         run: |
-          for i in {1..20}; do
+          for i in {1..30}; do
             pg_isready -h localhost -p 5434 -U main && break
-            sleep 1
+            sleep 2
           done
+
+      - name: Ensure database exists (idempotent)
+        env:
+          PGPASSWORD: main
+        run: |
+          psql -h localhost -p 5434 -U main -tc "SELECT 1 FROM pg_database WHERE datname='main'" | grep -q 1 || \
+          psql -h localhost -p 5434 -U main -c "CREATE DATABASE main;"
+
+      - name: (Optional) Run migrations if Alembic is present
+        run: |
+          if [ -d alembic ]; then
+            alembic upgrade head
+          fi
 
       - name: Run tests with coverage
         run: |
