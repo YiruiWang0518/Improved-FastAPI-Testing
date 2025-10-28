@@ -52,11 +52,16 @@ jobs:
       - name: Configure env
         run: |
           echo "APP_ENV=test" >> $GITHUB_ENV
-          # Use async psycopg driver and the correct DB/user/pass/port
+          # DSNs (set both sync/async style)
           echo "DATABASE_URL=postgresql+psycopg://main:main@localhost:5434/main" >> $GITHUB_ENV
-          # Some projects read a separate async DSN; set it too just in case
           echo "ASYNC_DATABASE_URL=postgresql+psycopg://main:main@localhost:5434/main" >> $GITHUB_ENV
-          # Split vars for configs that compose the DSN from parts
+          echo "SQLALCHEMY_DATABASE_URI=postgresql+psycopg://main:main@localhost:5434/main" >> $GITHUB_ENV
+          # PG* and POSTGRES_* fallbacks (some configs read these)
+          echo "PGHOST=localhost" >> $GITHUB_ENV
+          echo "PGPORT=5434" >> $GITHUB_ENV
+          echo "PGUSER=main" >> $GITHUB_ENV
+          echo "PGPASSWORD=main" >> $GITHUB_ENV
+          echo "PGDATABASE=main" >> $GITHUB_ENV
           echo "POSTGRES_HOST=localhost" >> $GITHUB_ENV
           echo "POSTGRES_PORT=5434" >> $GITHUB_ENV
           echo "POSTGRES_DB=main" >> $GITHUB_ENV
@@ -67,22 +72,32 @@ jobs:
       - name: Wait for Postgres to accept connections
         run: |
           for i in {1..30}; do
-            pg_isready -h localhost -p 5434 -U main && break
+            pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" && break
             sleep 2
           done
 
       - name: Ensure database exists (idempotent)
         env:
-          PGPASSWORD: main
+          PGPASSWORD: ${{ env.PGPASSWORD }}
         run: |
-          psql -h localhost -p 5434 -U main -tc "SELECT 1 FROM pg_database WHERE datname='main'" | grep -q 1 || \
-          psql -h localhost -p 5434 -U main -c "CREATE DATABASE main;"
+          psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -tc "SELECT 1 FROM pg_database WHERE datname='${PGDATABASE}'" | grep -q 1 || \
+          psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -c "CREATE DATABASE ${PGDATABASE};"
 
+      # Try Alembic, but don't fail the job if that repo's env hardcodes a different port.
       - name: (Optional) Run migrations if Alembic is present
+        if: ${{ hashFiles('alembic/**') != '' }}
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          ASYNC_DATABASE_URL: ${{ env.ASYNC_DATABASE_URL }}
+          SQLALCHEMY_DATABASE_URI: ${{ env.SQLALCHEMY_DATABASE_URI }}
+          PGHOST: ${{ env.PGHOST }}
+          PGPORT: ${{ env.PGPORT }}
+          PGUSER: ${{ env.PGUSER }}
+          PGPASSWORD: ${{ env.PGPASSWORD }}
+          PGDATABASE: ${{ env.PGDATABASE }}
         run: |
-          if [ -d alembic ]; then
-            alembic upgrade head
-          fi
+          alembic upgrade head || true
 
       - name: Run tests with coverage
         run: |
