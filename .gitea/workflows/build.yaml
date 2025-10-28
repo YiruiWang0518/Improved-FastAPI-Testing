@@ -1,0 +1,53 @@
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_USER: test
+          POSTGRES_DB: test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        id: setup-python
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          prune-cache: false
+          github-token: ${{ secrets.CONDUIT_GITHUB_TOKEN }}
+      - uses: https://gitea.okami101.io/okami101/actions/task@main
+        env:
+          DB_HOST: postgres
+          DB_PORT: 5432
+          DB_DATABASE: test
+          DB_USERNAME: test
+          DB_PASSWORD: test
+          JWT_SECRET_KEY: "super secret key"
+      - name: Cache sonar
+        uses: actions/cache@v4
+        with:
+          path: /opt/sonar-scanner/.sonar/cache
+          key: ${{ runner.os }}-sonar
+      - uses: https://github.com/sonarsource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+      - uses: https://gitea.okami101.io/okami101/actions/docker@main
+        with:
+          password: ${{ secrets.CONTAINER_REGISTRY_PASSWORD }}
+          gitea-token: ${{ secrets.RELEASE_TOKEN }}
+          release: true
