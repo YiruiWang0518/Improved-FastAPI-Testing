@@ -1,4 +1,3 @@
-
 name: improved-tests
 on:
   push:
@@ -16,7 +15,7 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: realworld_test
         ports:
-          - 5432:5432
+          - 5434:5432
         options: >-
           --health-cmd="pg_isready -U postgres"
           --health-interval=10s
@@ -42,7 +41,7 @@ jobs:
       - name: Configure env
         run: |
           echo "APP_ENV=test" >> $GITHUB_ENV
-          echo "DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5432/realworld_test" >> $GITHUB_ENV
+          echo "DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5434/realworld_test" >> $GITHUB_ENV
           echo "SECRET_KEY=test-secret-please-change" >> $GITHUB_ENV
       - name: Run tests with coverage
         run: |
